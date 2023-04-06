@@ -6,6 +6,7 @@ from avalanche_rl.evaluation.metrics.mean import WindowedMovingAverage
 from avalanche.training.templates.base import BaseTemplate
 from typing import List
 import numpy as np
+import torch
 
 
 class MovingWindowedStat(RLPluginMetric[float]):
@@ -84,8 +85,6 @@ def moving_window_stat(
                                                                mode=m), stats))
     return metrics
 
-# TODO: immediate reward metric
-
 
 class ReturnPluginMetric(MovingWindowedStat):
     """
@@ -123,7 +122,7 @@ class ReturnPluginMetric(MovingWindowedStat):
             self._last_returns_len = 0
 
     def after_rollout(self, strategy) -> None:
-        if self._mode == 'train':
+        if self._mode == 'train' and strategy.timestep >= 0:
             self.update(strategy)
             return self.emit()
 
@@ -165,7 +164,7 @@ class EpLengthPluginMetric(MovingWindowedStat):
                 self._moving_window.update(ep_len)
 
     # TODO:
-    # we could use same system GenericFloatMetricto specify reset callbacks
+    # we could use same system GenericFloatMetric to specify reset callbacks
 
     # Train
     def before_training_exp(self, strategy: 'BaseTemplate') -> 'MetricResult':
@@ -175,7 +174,7 @@ class EpLengthPluginMetric(MovingWindowedStat):
             self._actor_ep_lengths = defaultdict(lambda: 0)
 
     def after_rollout(self, strategy) -> None:
-        if self._mode == 'train':
+        if self._mode == 'train' and strategy.timestep >= 0:
             self.update(strategy)
             return self.emit()
 
@@ -226,8 +225,6 @@ class GenericFloatMetric(RLPluginMetric[float]):
         return self.metric_value
 
     def _update(self, strategy):
-        import torch
-        import numpy as np
         self.metric_value = getattr(strategy, self.metric_name)
         # add support for single item arrays/tensors (e.g. loss)
         if isinstance(
@@ -247,3 +244,32 @@ class GenericFloatMetric(RLPluginMetric[float]):
 
     def __str__(self):
         return self.name
+
+
+# TODO: immediate reward metric
+class ImmediateRewardMetric(GenericFloatMetric):
+    def __init__(self, metric_variable_name: str = "rewards", name: str = "reward", 
+                reset_value: float = None,
+                emit_on=['after_rollout'],
+                update_on=['after_rollout'],
+                reset_on=[]):
+        super().__init__(metric_variable_name, name, reset_value,
+                        emit_on, update_on, reset_on)
+        
+    def _update(self, strategy):
+        if strategy.timestep < 0:
+            # training is not started yet
+            return
+        
+        assert strategy.n_envs == 1, \
+            "ImmediateRewardMetrics works only for n_envs == 1"
+        rewards = getattr(strategy, self.metric_name)
+        self.metric_value = rewards['past_returns'][-1]
+
+        if isinstance(
+                self.metric_value, torch.Tensor) or isinstance(
+                self.metric_value, np.ndarray) or isinstance(
+                self.metric_value, np.generic):
+            self.metric_value = self.metric_value.item() 
+        if self.init_val is None:
+            self.init_val = self.metric_value
