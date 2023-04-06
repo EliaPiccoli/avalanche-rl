@@ -59,7 +59,7 @@ class TqdmWriteInteractiveLogger(InteractiveLogger, RLStrategyLogger):
                         metric_values: List['MetricValue'], **kwargs):
         # print("before_eval_exp")
         # super().before_eval_exp(strategy, metric_values, **kwargs)
-        # self._progress.total = strategy.eval_exp_len
+        self._progress.total = strategy.eval_episodes
         action_name = 'training' if strategy.is_training else 'eval'
         exp_id = strategy.experience.current_experience
         task_id = strategy.experience.task_label
