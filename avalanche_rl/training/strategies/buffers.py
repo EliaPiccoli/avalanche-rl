@@ -234,6 +234,7 @@ class ReplayMemory:
     n_envs: int
 
     def __post_init__(self):
+        self.pos: int = 0
         self.actual_size: int = 0
         self._initialized: bool = False
         self.observations = None 
@@ -284,16 +285,23 @@ class ReplayMemory:
             rollout = rollout[-self.size:]
             n_steps = self.size
 
-        self.actual_size = min(self.actual_size+n_steps, self.size)
+        self.actual_size = min(self.actual_size + n_steps, self.size)
+        check_overflow = self.pos + n_steps < self.size
+        pos_to_end = self.size - self.pos if check_overflow else 0
         # circular buffer strategy, put remaining element at the start
         # and replace old ones
         # do this for each rollout 'component'
         for attr in self._attrs:
             # get reference to tensor object
             tensor = getattr(self, attr)
-            tensor = torch.roll(tensor, n_steps, 0)
-            tensor[:n_steps] = getattr(rollout, attr)
+            tensor_rollout = getattr(rollout, attr)
+            if check_overflow:
+                tensor[self.pos:self.pos + n_steps] = tensor_rollout
+            else:
+                tensor[self.pos:self.pos + pos_to_end] = tensor_rollout[:pos_to_end]
+                tensor[:n_steps - pos_to_end] = tensor_rollout[pos_to_end:]
             setattr(self, attr, tensor)
+        self.pos = (self.pos + n_steps) % self.size
 
     def add_rollouts(self, rollouts: List[Rollout]):
         """
