@@ -40,7 +40,7 @@ class DQNStrategy(RLBaseStrategy):
             double_dqn: bool = True,
             target_net_update_interval: Union[int, Timestep] = 10000,
             polyak_update_tau: float = 1.,  # set to 1. to hard copy
-            device='cpu',
+            device='cpu', eval_device='cpu',
             plugins: Optional[Sequence[BasePlugin]] = [],
             reset_replay_on_new_experience: bool = True,
             initial_replay_memory: ReplayMemory = None,
@@ -57,7 +57,7 @@ class DQNStrategy(RLBaseStrategy):
             updates_per_step=updates_per_step, device=device, plugins=plugins,
             evaluator=evaluator, discount_factor=discount_factor,
             eval_every=eval_every, eval_episodes=eval_episodes,
-            max_grad_norm=max_grad_norm, **kwargs)
+            max_grad_norm=max_grad_norm, eval_device=eval_device, **kwargs)
         if type(target_net_update_interval) is int:
             target_net_update_interval: Timestep = Timestep(
                 target_net_update_interval)

@@ -39,8 +39,8 @@ class RLBaseStrategy(BaseTemplate):
             per_experience_steps: Union[int, Timestep, List[Timestep]],
             criterion=nn.MSELoss(),
             rollouts_per_step: int = 1, max_steps_per_rollout: int = -1,
-            updates_per_step: int = 1, device='cpu', max_grad_norm=None,
-            plugins: List[BasePlugin] = [],
+            updates_per_step: int = 1, device='cpu', eval_device='cpu',
+            max_grad_norm=None, plugins: List[BasePlugin] = [],
             discount_factor: float = 0.99, evaluator=default_rl_logger,
             eval_every=-1, eval_episodes: int = 1):
         """
@@ -123,6 +123,7 @@ class RLBaseStrategy(BaseTemplate):
                     during evaluation. Defaults to 1.
         """
         super().__init__(model, device=device, plugins=plugins)
+        self.eval_device = eval_device
 
         assert rollouts_per_step > 0 or max_steps_per_rollout > 0, \
             "Must specify at least one terminal condition for rollouts!"
@@ -162,6 +163,7 @@ class RLBaseStrategy(BaseTemplate):
         self.plugins.append(evaluator)
         self.evaluator = evaluator
 
+        self.timestep = -1
         self.training_exp_counter = 0
         """ Counts the number of training steps. +1 at the end of each 
         experience. """
@@ -232,9 +234,12 @@ class RLBaseStrategy(BaseTemplate):
         # to compute timestep differences more efficiently
         ep_len_sum = [sum(self.ep_lengths[k]) for k in range(self.n_envs)]
 
-        # reset environment on first run
-        if self._obs is None:
-            self._obs = env.reset()
+        # # reset environment on first run
+        # if self._obs is None:
+        #     self._obs = env.reset()
+
+        # reset environment
+        self._obs = env.reset()
 
         for t in count(start=1):
             # sample action(s) from policy moving observation to device;
@@ -247,21 +252,23 @@ class RLBaseStrategy(BaseTemplate):
 
             step_experiences.append(
                 Step(self._obs, action, dones, rewards, next_obs))
-            self.rollout_steps += 1
-            # keep track of all rewards for parallel environments
-            self.rewards['curr_returns'] += rewards.reshape(-1,)
-
+            
             self._obs = next_obs
 
-            dones_idx = dones.reshape(-1, 1).nonzero()[0]
-            for env_done in dones_idx:
-                self.ep_lengths[env_done].append(
-                    self.rollout_steps-ep_len_sum[env_done])
-                ep_len_sum[env_done] += self.ep_lengths[env_done][-1]
-                # record done episode returns
-                self.rewards['past_returns'].append(
-                    self.rewards['curr_returns'][env_done])
-                self.rewards['curr_returns'][env_done] = 0.
+            if self.timestep >= 0:
+                self.rollout_steps += 1
+                # keep track of all rewards for parallel environments
+                self.rewards['curr_returns'] += rewards.reshape(-1,)
+
+                dones_idx = dones.reshape(-1, 1).nonzero()[0]
+                for env_done in dones_idx:
+                    self.ep_lengths[env_done].append(
+                        self.rollout_steps-ep_len_sum[env_done])
+                    ep_len_sum[env_done] += self.ep_lengths[env_done][-1]
+                    # record done episode returns
+                    self.rewards['past_returns'].append(
+                        self.rewards['curr_returns'][env_done])
+                    self.rewards['curr_returns'][env_done] = 0.
 
             # Vectorized env auto resets on done by default,
             # check this flag to count episodes
@@ -281,6 +288,16 @@ class RLBaseStrategy(BaseTemplate):
                 break
 
             if max_steps > 0 and n_rollouts <= 0 and t >= max_steps:
+                if self.timestep >= 0:
+                    for env_idx in range(self.n_envs):
+                        if env_idx not in dones_idx:
+                            self.ep_lengths[env_idx].append(
+                                self.rollout_steps-ep_len_sum[env_idx])
+                            ep_len_sum[env_idx] += self.ep_lengths[env_idx][-1]
+                            # record done episode returns
+                            self.rewards['past_returns'].append(
+                                self.rewards['curr_returns'][env_idx])
+                            self.rewards['curr_returns'][env_idx] = 0.
                 rollouts.append(Rollout(step_experiences, n_envs=self.n_envs))
                 break
 
@@ -344,7 +361,7 @@ class RLBaseStrategy(BaseTemplate):
         # TODO:  keep track in default evaluator
         self.rollout_steps = 0
         # one per (parallel) environment
-        self.ep_lengths: Dict[int, List[float]] = defaultdict(lambda: list([0]))
+        self.ep_lengths: Dict[int, List[float]] = defaultdict(lambda: list([]))
         # curr episode returns (per actor) - previous episodes returns 
         self.rewards = {'curr_returns': np.zeros(
                             (self.n_envs,),
@@ -417,7 +434,8 @@ class RLBaseStrategy(BaseTemplate):
             self.is_training)
 
         if (self.eval_every >= 0 and do_final) or \
-           (self.eval_every > 0 and self.timestep % self.eval_every == 0):
+           (self.eval_every > 0 and self.timestep % self.eval_every == 0 and \
+            self.timestep > 0): # add >= here to evaluate at step 0
             for exp in eval_streams:
                 self.eval(exp)
 
@@ -441,6 +459,7 @@ class RLBaseStrategy(BaseTemplate):
         """
         self.is_training = False
         self.model.eval()
+        self.model.to(self.eval_device)
 
         if isinstance(exp_list, RLExperience):
             exp_list: List[RLExperience] = [exp_list]
@@ -464,6 +483,7 @@ class RLBaseStrategy(BaseTemplate):
         self._after_eval(**kwargs)
 
         res = self.evaluator.get_last_metrics()
+        self.model.to(self.device)
 
         return res
 
@@ -484,7 +504,7 @@ class RLBaseStrategy(BaseTemplate):
                 # indefinitely
                 self._before_eval_forward(**kwargs) 
                 action = self.model.get_action(
-                    obs.unsqueeze(0).to(self.device),
+                    obs.unsqueeze(0).to(self.eval_device),
                     task_label=self.experience.task_label)
                 self._after_eval_forward(**kwargs)
                 obs, reward, done, info = self.environment.step(action.item())
