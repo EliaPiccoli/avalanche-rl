@@ -261,10 +261,14 @@ class ImmediateRewardMetric(GenericFloatMetric):
             # training is not started yet
             return
         
-        assert strategy.n_envs == 1, \
-            "ImmediateRewardMetrics works only for n_envs == 1"
+        # assert strategy.n_envs == 1, \
+        #     "ImmediateRewardMetrics works only for n_envs == 1"
         rewards = getattr(strategy, self.metric_name)
-        self.metric_value = rewards['past_returns'][-1]
+        if strategy.n_envs == 1:
+            self.metric_value = rewards['past_returns'][-1]
+        else:
+            self.metric_value = sum(
+                rewards['past_returns'][-strategy.n_envs:])/strategy.n_envs
 
         if isinstance(
                 self.metric_value, torch.Tensor) or isinstance(

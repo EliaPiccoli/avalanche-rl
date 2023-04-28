@@ -90,11 +90,15 @@ def make_actor_atari_env(
     # we need to clone state in actors local memory because of
     # `restore_full_state` which uses `as_ctypes` to convert state which
     # in turn requires the array to be writeable
+    
+    # BUG: this is not true with current libs versions
     # NOTE: atari_state behavior was changed so this is no longer needed
-    # state = np.zeros_like(atari_state, dtype=atari_state.dtype)
-    # state[:] = atari_state
+    state = np.zeros_like(atari_state, dtype=atari_state.dtype)
+    state[:] = atari_state
+    
+    print(wrappers)
     env = make_env(env_id, wrappers=wrappers)
-    env.unwrapped.restore_full_state(atari_state)
+    env.unwrapped.restore_full_state(state)
 
     return env
 
@@ -114,7 +118,7 @@ class VectorizedEnvironment(object):
                               List[gym.Env], gym.Env],
             n_envs: int, env_kwargs=dict(), auto_reset: bool = True,
             wrappers_generators: List[Callable[[Any], Wrapper]] = None,
-            ray_kwargs={'num_cpus': multiprocessing.cpu_count()}
+            ray_kwargs={'num_cpus': multiprocessing.cpu_count(), 'num_gpus': 0}
             ) -> None:
         # Avoid passing over potentially big objects on the network, prefer
         # creating env locally to each actor
@@ -143,6 +147,7 @@ class VectorizedEnvironment(object):
                 # actor will instatiate environment locally
                 envs = [make_actor_atari_env for _ in range(n_envs)]
 
+                print(wrappers_generators)
                 # atari games do not accept env kwargs on creation,
                 # so we just leverage env_kwargs
                 env_kwargs = dict(

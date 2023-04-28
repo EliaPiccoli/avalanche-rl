@@ -17,7 +17,7 @@ class A2CStrategy(RLBaseStrategy):
             per_experience_steps: Union[int, Timestep, List[Timestep]],
             max_steps_per_rollout: int = 5,
             value_criterion=nn.MSELoss(),
-            device='cpu',
+            device='cpu', eval_device='cpu',
             plugins: Optional[Sequence[BasePlugin]] = [],
             eval_every: int = -1, eval_episodes: int = 1, 
             policy_loss_weight: float = 0.5,
@@ -32,7 +32,7 @@ class A2CStrategy(RLBaseStrategy):
             # different length
             rollouts_per_step=-1,
             max_steps_per_rollout=max_steps_per_rollout,
-            device=device, plugins=plugins,
+            device=device, eval_device=eval_device, plugins=plugins,
             eval_every=eval_every, eval_episodes=eval_episodes, 
             evaluator=evaluator, **kwargs)
 

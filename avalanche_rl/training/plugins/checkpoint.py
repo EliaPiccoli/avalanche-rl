@@ -221,7 +221,11 @@ class CheckpointPlugin(BasePlugin[BaseTemplate]):
 
         # clock is not implemented in RL strategies
         # rl_base_strategy.py @ L150
-        ended_experience_counter = strategy.timestep
+        if strategy.current_experience_steps.value > strategy.timestep + 1:
+            counter = strategy.timestep
+        else:
+            counter = -1 
+        ended_experience_counter = counter
 
         checkpoint_data = {
             'strategy': strategy,
@@ -229,8 +233,11 @@ class CheckpointPlugin(BasePlugin[BaseTemplate]):
             'exp_counter': ended_experience_counter
         }
 
+        num = str(ended_experience_counter) \
+            if ended_experience_counter > 0 \
+            else 'final'
         self.storage.store_checkpoint(
-            str(ended_experience_counter),
+            num,
             partial(CheckpointPlugin.save_checkpoint,
                     checkpoint_data))
         print('Checkpoint', ended_experience_counter, 'saved!')
